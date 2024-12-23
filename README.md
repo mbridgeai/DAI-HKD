@@ -135,12 +135,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## Contact
-
-- Website: [hkdst.io](https://hkdst.io)
-- Twitter: [@hkdst](https://twitter.com/hkdst)
-- Email: contact@hkdst.io
-
 ## Acknowledgments
 
 - OpenZeppelin for secure smart contract implementations
