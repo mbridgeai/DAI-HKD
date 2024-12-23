@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+
+contract HKDStableToken is ERC20, Ownable, ReentrancyGuard {
+    IERC20 public dai;
+    AggregatorV3Interface public hkdUsdPriceFeed;
+    
+    uint256 public constant PRICE_PRECISION = 1e8;  // Chainlink price feed precision
+    uint256 public constant DAI_PRECISION = 1e18;   // DAI token precision
+    
+    event Minted(address indexed user, uint256 daiAmount, uint256 hkdstAmount);
+    event Redeemed(address indexed user, uint256 hkdstAmount, uint256 daiAmount);
+    
+    constructor(
+        address _dai,
+        address _hkdUsdPriceFeed
+    ) ERC20("HKD Stable Token", "HKDST") Ownable(msg.sender) {
+        dai = IERC20(_dai);
+        hkdUsdPriceFeed = AggregatorV3Interface(_hkdUsdPriceFeed);
+    }
+    
+    /**
+     * @dev Gets the latest HKD/USD price from Chainlink oracle
+     * @return price Latest HKD/USD price with 8 decimals precision
+     */
+    function getLatestHKDUSDPrice() public view returns (uint256) {
+        (, int256 price,,,) = hkdUsdPriceFeed.latestRoundData();
+        require(price > 0, "Invalid price feed");
+        return uint256(price);
+    }
+    
+    /**
+     * @dev Calculates the amount of HKDST to mint based on DAI amount
+     * @param daiAmount Amount of DAI to convert
+     * @return hkdstAmount Amount of HKDST tokens to mint
+     */
+    function calculateHKDSTAmount(uint256 daiAmount) public view returns (uint256) {
+        uint256 hkdUsdRate = getLatestHKDUSDPrice();
+        // Convert DAI to USD (assuming DAI = 1 USD)
+        // Then convert USD to HKD using the price feed
+        return (daiAmount * PRICE_PRECISION) / hkdUsdRate;
+    }
+    
+    /**
+     * @dev Mints HKDST tokens by depositing DAI
+     * @param daiAmount Amount of DAI to deposit
+     */
+    function mint(uint256 daiAmount) external nonReentrant {
+        require(daiAmount > 0, "Amount must be greater than 0");
+        
+        uint256 hkdstAmount = calculateHKDSTAmount(daiAmount);
+        require(hkdstAmount > 0, "Invalid HKDST amount");
+        
+        require(dai.transferFrom(msg.sender, address(this), daiAmount), "DAI transfer failed");
+        
+        _mint(msg.sender, hkdstAmount);
+        
+        emit Minted(msg.sender, daiAmount, hkdstAmount);
+    }
+    
+    /**
+     * @dev Calculates the amount of DAI to return based on HKDST amount
+     * @param hkdstAmount Amount of HKDST to convert
+     * @return daiAmount Amount of DAI tokens to return
+     */
+    function calculateDAIAmount(uint256 hkdstAmount) public view returns (uint256) {
+        uint256 hkdUsdRate = getLatestHKDUSDPrice();
+        // Convert HKD to USD using the price feed
+        // Then convert USD to DAI (assuming 1 USD = 1 DAI)
+        return (hkdstAmount * hkdUsdRate) / PRICE_PRECISION;
+    }
+    
+    /**
+     * @dev Redeems HKDST tokens for DAI
+     * @param hkdstAmount Amount of HKDST to redeem
+     */
+    function redeem(uint256 hkdstAmount) external nonReentrant {
+        require(hkdstAmount > 0, "Amount must be greater than 0");
+        require(balanceOf(msg.sender) >= hkdstAmount, "Insufficient HKDST balance");
+        
+        uint256 daiAmount = calculateDAIAmount(hkdstAmount);
+        require(daiAmount > 0, "Invalid DAI amount");
+        require(dai.balanceOf(address(this)) >= daiAmount, "Insufficient DAI reserves");
+        
+        _burn(msg.sender, hkdstAmount);
+        require(dai.transfer(msg.sender, daiAmount), "DAI transfer failed");
+        
+        emit Redeemed(msg.sender, hkdstAmount, daiAmount);
+    }
+    
+    /**
+     * @dev Allows owner to withdraw excess DAI reserves
+     * @param amount Amount of excess DAI to withdraw
+     */
+    function withdrawExcessReserves(uint256 amount) external onlyOwner {
+        uint256 totalSupplyInDai = calculateDAIAmount(totalSupply());
+        uint256 currentReserves = dai.balanceOf(address(this));
+        require(currentReserves - amount >= totalSupplyInDai, "Insufficient reserves after withdrawal");
+        
+        require(dai.transfer(owner(), amount), "DAI transfer failed");
+    }
+}
