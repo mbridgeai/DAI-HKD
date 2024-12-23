@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+contract HKDStableToken is ERC20, Ownable {
+AggregatorV3Interface private priceFeed; // Chainlink price feed for HKD/USD
+address public daiAddress; // Address of the DAI token contract
+constructor(address _priceFeed, address _daiAddress) ERC20("HKD Stable Token", "HKDST") {
+priceFeed = AggregatorV3Interface(_priceFeed);
+daiAddress = _daiAddress;
+}
+/**
+*/
+* @dev Fetch the latest HKD/USD price from the oracle.
+* @return price in cents (e.g., 775 for 7.75 HKD/USD)
+function getHKDPrice() public view returns (uint256) {
+(, int256 price, , , ) = priceFeed.latestRoundData();
+require(price > 0, "Invalid price from oracle");
+return uint256(price) / 1e6; // Assuming Chainlink returns price with 8 decimals
+}
+/**
+*/
+* @dev Buy HKDST tokens using DAI at a dynamic rate.
+* @param amount The amount of HKDST tokens to purchase.
+function buy(uint256 amount) external {
+uint256 hkdPrice = getHKDPrice();
+uint256 daiRequired = (amount * hkdPrice) / 100; // Calculate DAI required based on dynamic rate
+IERC20 dai = IERC20(daiAddress);
+require(dai.transferFrom(msg.sender, address(this), daiRequired), "DAI transfer failed");
+_mint(msg.sender, amount); // Mint HKDST tokens to the buyer
+}
+/**
+*/
+* @dev Redeem HKDST tokens for DAI at a dynamic rate.
+* @param amount The amount of HKDST tokens to redeem.
+function redeem(uint256 amount) external {
+uint256 hkdPrice = getHKDPrice();
+uint256 daiToReturn = (amount * hkdPrice) / 100; // Calculate DAI equivalent based on dynamic rate
+IERC20 dai = IERC20(daiAddress);
+require(dai.balanceOf(address(this)) >= daiToReturn, "Insuﬃcient DAI reserves");
+_burn(msg.sender, amount); // Burn HKDST tokens
+require(dai.transfer(msg.sender, daiToReturn), "DAI transfer failed");
+}
+/**
+*/
+* @dev Owner can withdraw excess DAI.
+function withdrawDAI(uint256 amount) external onlyOwner {
+IERC20 dai = IERC20(daiAddress);
+require(dai.transfer(owner(), amount), "DAI transfer failed");
+}
+}
